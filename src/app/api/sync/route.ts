@@ -65,13 +65,31 @@ export async function POST(request: Request) {
     for (const event of events) {
       if (!event.id || !event.summary) continue
 
-      const startDate = event.start?.date || event.start?.dateTime
-      if (!startDate) continue
+      // Handle all-day events vs timed events
+      let eventDate: string
+      let startTime: string
 
-      const eventDate = new Date(startDate).toISOString().split('T')[0]
-      const startTime = event.start?.dateTime
-        ? new Date(event.start.dateTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-        : 'All Day'
+      if (event.start?.date) {
+        // All-day event - date is in YYYY-MM-DD format already
+        eventDate = event.start.date
+        startTime = 'All Day'
+      } else if (event.start?.dateTime) {
+        // Timed event - dateTime is in ISO format with timezone
+        const eventDateTime = new Date(event.start.dateTime)
+
+        // Format date as YYYY-MM-DD in the event's timezone
+        eventDate = event.start.dateTime.split('T')[0]
+
+        // Format time in 12-hour format with AM/PM
+        const hours = eventDateTime.getHours()
+        const minutes = eventDateTime.getMinutes()
+        const ampm = hours >= 12 ? 'PM' : 'AM'
+        const displayHours = hours % 12 || 12
+        const displayMinutes = minutes.toString().padStart(2, '0')
+        startTime = `${displayHours}:${displayMinutes} ${ampm}`
+      } else {
+        continue // Skip events without start time
+      }
 
       // Check if we already have this event mapped
       const { data: existing } = await supabase

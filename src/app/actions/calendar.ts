@@ -122,17 +122,39 @@ async function syncCalendarEvents(calendarId: string, userId: string, craftApiUr
 
     // Convert new events to Craft tasks
     const tasks = newEvents.map(event => {
-      const startDate = event.start?.dateTime || event.start?.date
       const title = event.summary || 'Untitled Event'
       const location = event.location ? ` @ ${event.location}` : ''
-      const startTime = event.start?.dateTime
-        ? new Date(event.start.dateTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-        : 'All Day'
+
+      // Handle all-day events vs timed events
+      let scheduleDate: string | undefined
+      let startTime: string
+
+      if (event.start?.date) {
+        // All-day event - date is in YYYY-MM-DD format already
+        scheduleDate = event.start.date
+        startTime = 'All Day'
+      } else if (event.start?.dateTime) {
+        // Timed event - dateTime is in ISO format with timezone
+        const eventDateTime = new Date(event.start.dateTime)
+
+        // Format date as YYYY-MM-DD in the event's timezone
+        scheduleDate = event.start.dateTime.split('T')[0]
+
+        // Format time in 12-hour format with AM/PM
+        const hours = eventDateTime.getHours()
+        const minutes = eventDateTime.getMinutes()
+        const ampm = hours >= 12 ? 'PM' : 'AM'
+        const displayHours = hours % 12 || 12
+        const displayMinutes = minutes.toString().padStart(2, '0')
+        startTime = `${displayHours}:${displayMinutes} ${ampm}`
+      } else {
+        // No start time, skip this event
+        scheduleDate = undefined
+        startTime = 'No Time'
+      }
 
       // Format as simple markdown - Craft will handle rendering
       const markdown = `${startTime} • ${title}${location}`
-
-      const scheduleDate = startDate ? new Date(startDate).toISOString().split('T')[0] : undefined
 
       return {
         markdown,
