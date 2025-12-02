@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { listGoogleCalendars, watchCalendar } from '@/app/actions/calendar'
+import { listGoogleCalendarsWithToken, watchCalendar } from '@/app/actions/calendar'
+import { createClient } from '@/utils/supabase/client'
 import { Loader2 } from 'lucide-react'
 
 interface CalendarSelectStepProps {
@@ -16,14 +17,26 @@ export function CalendarSelectStep({ onNext, onBack }: CalendarSelectStepProps) 
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     async function load() {
       try {
-        const cals = await listGoogleCalendars()
+        const supabase = createClient()
+        const { data: { session } } = await supabase.auth.getSession()
+        
+        if (!session?.provider_token) {
+          console.error('No provider token available')
+          setError('Google connection expired. Please go back and reconnect.')
+          setLoading(false)
+          return
+        }
+
+        const cals = await listGoogleCalendarsWithToken(session.provider_token)
         setCalendars(cals)
       } catch (e) {
-        console.error(e)
+        console.error('Error loading calendars:', e)
+        setError('Failed to load calendars. Please try reconnecting.')
       } finally {
         setLoading(false)
       }
@@ -59,6 +72,27 @@ export function CalendarSelectStep({ onNext, onBack }: CalendarSelectStepProps) 
     return (
       <div className="flex items-center justify-center py-16">
         <Loader2 className="w-8 h-8 animate-spin text-[#3c2cd4]" />
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-8 max-w-2xl mx-auto">
+        <div className="text-center space-y-2">
+          <h2 className="text-3xl font-bold text-gray-900">Connection Issue</h2>
+          <p className="text-red-600">{error}</p>
+        </div>
+        <div className="flex items-center justify-center pt-6">
+          <Button 
+            onClick={onBack} 
+            variant="outline" 
+            size="lg"
+            className="border-2 hover:bg-gray-50"
+          >
+            Go Back to Reconnect
+          </Button>
+        </div>
       </div>
     )
   }

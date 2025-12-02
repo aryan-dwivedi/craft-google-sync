@@ -5,6 +5,29 @@ import { google } from 'googleapis'
 import { CraftClient } from '@/lib/craft'
 import { getUserSettings } from './settings'
 
+export async function listGoogleCalendarsWithToken(providerToken: string) {
+  if (!providerToken) {
+    throw new Error('No provider token provided')
+  }
+
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET
+  )
+  
+  oauth2Client.setCredentials({ access_token: providerToken })
+
+  const calendar = google.calendar({ version: 'v3', auth: oauth2Client })
+  
+  try {
+    const response = await calendar.calendarList.list()
+    return response.data.items || []
+  } catch (error) {
+    console.error('Error fetching calendars:', error)
+    throw error
+  }
+}
+
 export async function listGoogleCalendars() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -134,19 +157,33 @@ async function syncCalendarEvents(calendarId: string, userId: string, craftApiUr
         scheduleDate = event.start.date
         startTime = 'All Day'
       } else if (event.start?.dateTime) {
-        // Timed event - dateTime is in ISO format with timezone
-        const eventDateTime = new Date(event.start.dateTime)
-
-        // Format date as YYYY-MM-DD in the event's timezone
-        scheduleDate = event.start.dateTime.split('T')[0]
-
-        // Format time in 12-hour format with AM/PM
-        const hours = eventDateTime.getHours()
-        const minutes = eventDateTime.getMinutes()
-        const ampm = hours >= 12 ? 'PM' : 'AM'
-        const displayHours = hours % 12 || 12
-        const displayMinutes = minutes.toString().padStart(2, '0')
-        startTime = `${displayHours}:${displayMinutes} ${ampm}`
+        // Timed event - dateTime is in ISO format with timezone (e.g., 2025-12-02T14:30:00+05:30)
+        // Parse the time directly from the ISO string to preserve the original timezone
+        const dateTimeStr = event.start.dateTime
+        
+        // Extract the date part (YYYY-MM-DD)
+        scheduleDate = dateTimeStr.split('T')[0]
+        
+        // Extract the time part from the ISO string
+        // The time is between 'T' and the timezone indicator (+, -, or Z)
+        const timeMatch = dateTimeStr.match(/T(\d{2}):(\d{2})/)
+        if (timeMatch) {
+          const hours = parseInt(timeMatch[1], 10)
+          const minutes = timeMatch[2]
+          
+          // Format time in 12-hour format with AM/PM
+          const ampm = hours >= 12 ? 'PM' : 'AM'
+          const displayHours = hours % 12 || 12
+          startTime = `${displayHours}:${minutes} ${ampm}`
+        } else {
+          // Fallback: use JavaScript Date parsing
+          const eventDateTime = new Date(dateTimeStr)
+          const hours = eventDateTime.getHours()
+          const minutes = eventDateTime.getMinutes().toString().padStart(2, '0')
+          const ampm = hours >= 12 ? 'PM' : 'AM'
+          const displayHours = hours % 12 || 12
+          startTime = `${displayHours}:${minutes} ${ampm}`
+        }
       } else {
         // No start time, skip this event
         scheduleDate = undefined
@@ -155,6 +192,8 @@ async function syncCalendarEvents(calendarId: string, userId: string, craftApiUr
 
       // Format as simple markdown - Craft will handle rendering
       const markdown = `${startTime} • ${title}${location}`
+
+      console.log(`Event "${title}" - Date: ${scheduleDate}, Time: ${startTime}`)
 
       return {
         markdown,
@@ -166,20 +205,62 @@ async function syncCalendarEvents(calendarId: string, userId: string, craftApiUr
           type: 'dailyNote' as const,
           dailyNoteDate: scheduleDate, // Place task in the daily note for that date
         },
+        // Keep reference to original event for mapping
+        _eventId: event.id,
+        _scheduleDate: scheduleDate,
       }
     })
 
-    // Create tasks in Craft using Tasks API
-    const result = await craftClient.createTasks(tasks)
-    console.log(`Created ${result.items?.length || 0} new tasks in Craft`)
+    // Group tasks by date to ensure they're placed in the correct daily notes
+    const tasksByDate = new Map<string, typeof tasks>()
+    for (const task of tasks) {
+      const date = task._scheduleDate || 'no-date'
+      if (!tasksByDate.has(date)) {
+        tasksByDate.set(date, [])
+      }
+      tasksByDate.get(date)!.push(task)
+    }
+
+    console.log(`Grouped tasks into ${tasksByDate.size} date groups:`, 
+      Array.from(tasksByDate.entries()).map(([date, t]) => `${date}: ${t.length} tasks`)
+    )
+
+    // Create tasks in Craft - one batch per date to ensure correct daily note placement
+    const allCreatedBlocks: any[] = []
+    const eventIdToBlockId = new Map<string, string>()
+
+    for (const [date, dateTasks] of tasksByDate) {
+      console.log(`Creating ${dateTasks.length} tasks for date: ${date}`)
+      
+      // Remove internal properties before sending to API
+      const cleanTasks = dateTasks.map(({ _eventId, _scheduleDate, ...task }) => task)
+      
+      try {
+        const result = await craftClient.createTasks(cleanTasks)
+        console.log(`Created ${result.items?.length || 0} tasks for date ${date}`)
+        
+        // Map event IDs to created block IDs
+        const createdBlocks = result.items || []
+        dateTasks.forEach((task, index) => {
+          if (createdBlocks[index]?.id) {
+            eventIdToBlockId.set(task._eventId!, createdBlocks[index].id)
+            allCreatedBlocks.push(createdBlocks[index])
+          }
+        })
+      } catch (error) {
+        console.error(`Error creating tasks for date ${date}:`, error)
+        // Continue with other dates even if one fails
+      }
+    }
+
+    console.log(`Created ${allCreatedBlocks.length} total tasks in Craft`)
 
     // Save event mappings to database with the returned block IDs
-    const createdBlocks = result.items || []
-    const mappings = newEvents.map((event, index) => ({
+    const mappings = newEvents.map((event) => ({
       user_id: userId,
       google_calendar_id: calendarId,
       google_event_id: event.id!,
-      craft_block_id: createdBlocks[index]?.id || null,
+      craft_block_id: eventIdToBlockId.get(event.id!) || null,
       event_date: event.start?.dateTime || event.start?.date || null,
     }))
 

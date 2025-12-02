@@ -10,10 +10,11 @@ interface GoogleConnectStepProps {
 export function GoogleConnectStep({ onNext, onBack }: GoogleConnectStepProps) {
   const handleConnect = async () => {
     const supabase = createClient()
+    const callbackUrl = `${window.location.origin}/auth/callback?next=${encodeURIComponent('/onboarding?step=4')}`
     await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/onboarding?step=4`,
+        redirectTo: callbackUrl,
         scopes: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly',
         queryParams: {
           access_type: 'offline',
