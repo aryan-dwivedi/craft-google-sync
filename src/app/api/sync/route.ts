@@ -61,6 +61,36 @@ export async function POST(request: Request) {
     }
     const craft = new CraftClient(craftToken)
 
+    // Get all existing event mappings for this user to detect deletions
+    const { data: existingMappings } = await supabase
+      .from('event_mappings')
+      .select('*')
+      .eq('user_id', calendar.user_id)
+
+    // Create a set of current Google event IDs
+    const currentEventIds = new Set(events.map(e => e.id).filter(Boolean))
+
+    // Find mappings for events that no longer exist (deleted events)
+    const deletedMappings = (existingMappings || []).filter(
+      mapping => !currentEventIds.has(mapping.google_event_id)
+    )
+
+    // Delete Craft tasks for deleted events
+    for (const mapping of deletedMappings) {
+      if (mapping.craft_block_id) {
+        try {
+          await craft.deleteTasks([mapping.craft_block_id])
+        } catch (deleteError) {
+          console.error('Failed to delete Craft task:', deleteError)
+        }
+      }
+      // Remove the mapping from the database
+      await supabase
+        .from('event_mappings')
+        .delete()
+        .eq('id', mapping.id)
+    }
+
     // Process each event
     for (const event of events) {
       if (!event.id || !event.summary) continue
@@ -137,10 +167,10 @@ export async function POST(request: Request) {
     await supabase.from('sync_logs').insert({
       user_id: calendar.user_id,
       status: 'success',
-      details: { channelId, eventsProcessed: events.length },
+      details: { channelId, eventsProcessed: events.length, eventsDeleted: deletedMappings.length },
     })
 
-    return NextResponse.json({ success: true, eventsProcessed: events.length })
+    return NextResponse.json({ success: true, eventsProcessed: events.length, eventsDeleted: deletedMappings.length })
   } catch (error) {
     console.error('Sync error:', error)
     
