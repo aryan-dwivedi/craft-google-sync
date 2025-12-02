@@ -1,0 +1,17 @@
+import { getUserSettings } from '@/app/actions/settings'
+import { createClient } from '@/utils/supabase/server'
+import { redirect } from 'next/navigation'
+import { DashboardClient } from './DashboardClient'
+
+export default async function Dashboard() {
+  const settings = await getUserSettings()
+  
+  if (!settings?.onboarding_completed) {
+    redirect('/onboarding')
+  }
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  return <DashboardClient userEmail={user?.email} />
+}
