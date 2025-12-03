@@ -346,7 +346,11 @@ export async function watchCalendar(calendarId: string) {
   oauth2Client.setCredentials({ access_token: providerToken })
   const calendar = google.calendar({ version: 'v3', auth: oauth2Client })
 
-  const webhookUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/google-calendar-webhook`
+  // Ensure no trailing whitespace/newlines in the URL
+  const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim()
+  const webhookUrl = `${supabaseUrl}/functions/v1/google-calendar-webhook`
+  
+  console.log('Webhook URL:', webhookUrl)
   
   // Generate a valid channel ID (must match [A-Za-z0-9\-_\+/=]+)
   const channelId = crypto.randomUUID()
