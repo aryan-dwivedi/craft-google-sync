@@ -352,7 +352,28 @@ export async function watchCalendar(calendarId: string) {
   const channelId = crypto.randomUUID()
 
   try {
-    // First, perform initial sync of existing events
+    // Calculate token expiry (Google tokens typically last 1 hour)
+    const tokenExpiry = new Date(Date.now() + 3600 * 1000).toISOString()
+
+    // FIRST: Save the calendar record with tokens to database
+    // This must happen before syncCalendarEvents which reads from DB
+    console.log('Saving calendar record with tokens to database...')
+    const { error: insertError } = await supabase.from('calendars').upsert({
+      user_id: user.id,
+      google_calendar_id: calendarId,
+      is_enabled: true,
+      access_token: providerToken,
+      refresh_token: providerRefreshToken,
+      token_expiry: tokenExpiry,
+    }, { onConflict: 'user_id, google_calendar_id' })
+
+    if (insertError) {
+      console.error('Failed to save calendar record:', insertError)
+      throw new Error('Failed to save calendar. Please try again.')
+    }
+    console.log('Calendar record saved successfully')
+
+    // THEN: Perform initial sync of existing events
     console.log('Performing initial sync of calendar events...')
     const syncResult = await syncCalendarEvents(
       calendarId,
@@ -362,7 +383,7 @@ export async function watchCalendar(calendarId: string) {
     )
     console.log(`Initial sync complete: ${syncResult.synced} events synced`)
 
-    // Then set up webhook for future changes
+    // FINALLY: Set up webhook for future changes and update the record
     const response = await calendar.events.watch({
       calendarId,
       requestBody: {
@@ -372,17 +393,13 @@ export async function watchCalendar(calendarId: string) {
       },
     })
 
-    // Save watch info AND tokens to database
-    await supabase.from('calendars').upsert({
-      user_id: user.id,
-      google_calendar_id: calendarId,
-      is_enabled: true,
+    // Update the calendar record with webhook info
+    await supabase.from('calendars').update({
       watch_channel_id: channelId,
       watch_resource_id: response.data.resourceId,
       watch_expiration: response.data.expiration ? new Date(parseInt(response.data.expiration)).toISOString() : null,
-      access_token: providerToken,
-      refresh_token: providerRefreshToken,
-    }, { onConflict: 'user_id, google_calendar_id' })
+      updated_at: new Date().toISOString(),
+    }).eq('user_id', user.id).eq('google_calendar_id', calendarId)
 
     return { success: true, synced: syncResult.synced }
   } catch (error) {
