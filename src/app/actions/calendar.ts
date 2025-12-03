@@ -1,9 +1,10 @@
 'use server'
 
-import { createClient } from '@/utils/supabase/server'
+import { createClient, createServiceClient } from '@/utils/supabase/server'
 import { google } from 'googleapis'
 import { CraftClient } from '@/lib/craft'
 import { getUserSettings } from './settings'
+import { setupOAuthClientWithRefresh } from '@/lib/google-auth'
 
 export async function listGoogleCalendarsWithToken(providerToken: string) {
   if (!providerToken) {
@@ -64,21 +65,34 @@ export async function listGoogleCalendars() {
 async function syncCalendarEvents(calendarId: string, userId: string, craftApiUrl: string, craftApiToken: string) {
   console.log('syncCalendarEvents called with:', { calendarId, userId, craftApiUrl: craftApiUrl ? 'present' : 'missing', craftApiToken: craftApiToken ? 'present' : 'missing' })
 
-  const supabase = await createClient()
-  const { data: { session } } = await supabase.auth.getSession()
-  const providerToken = session?.provider_token
+  const supabase = createServiceClient()
 
-  console.log('Provider token present:', !!providerToken)
+  // Fetch calendar tokens from database (uses service client to bypass RLS)
+  const { data: calendarData, error: calError } = await supabase
+    .from('calendars')
+    .select('access_token, refresh_token, user_id')
+    .eq('google_calendar_id', calendarId)
+    .eq('user_id', userId)
+    .single()
 
-  if (!providerToken) {
-    throw new Error('No provider token found')
+  if (calError || !calendarData) {
+    console.error('Failed to fetch calendar tokens:', calError)
+    throw new Error('Calendar not found or tokens unavailable')
   }
 
-  const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET
+  if (!calendarData.access_token || !calendarData.refresh_token) {
+    throw new Error('No Google tokens found. Please reconnect your Google account.')
+  }
+
+  console.log('Calendar tokens loaded from database')
+
+  // Setup OAuth client with automatic token refresh
+  const oauth2Client = await setupOAuthClientWithRefresh(
+    calendarData.access_token,
+    calendarData.refresh_token,
+    userId,
+    calendarId
   )
-  oauth2Client.setCredentials({ access_token: providerToken })
   const calendar = google.calendar({ version: 'v3', auth: oauth2Client })
 
   try {
@@ -300,18 +314,29 @@ async function syncCalendarEvents(calendarId: string, userId: string, craftApiUr
 
 export async function watchCalendar(calendarId: string) {
   const supabase = await createClient()
+
+  // Use getUser() instead of getSession() for security
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) {
+    throw new Error('Not authenticated')
+  }
+
   const { data: { session } } = await supabase.auth.getSession()
   const providerToken = session?.provider_token
   const providerRefreshToken = session?.provider_refresh_token
 
-  if (!providerToken || !session?.user) {
-    throw new Error('No provider token found')
+  if (!providerToken) {
+    throw new Error('No Google provider token found. Please reconnect your Google account.')
   }
 
   // Get user's Craft API credentials
   const settings = await getUserSettings()
-  if (!settings?.craft_api_url || !settings?.craft_api_token) {
-    throw new Error('Craft API not configured. Please complete onboarding.')
+  if (!settings) {
+    throw new Error('User settings not found. Please go back and complete the Craft API configuration.')
+  }
+
+  if (!settings.craft_api_url || !settings.craft_api_token) {
+    throw new Error('Craft API credentials are incomplete. Please go back and verify your Craft API configuration.')
   }
 
   const oauth2Client = new google.auth.OAuth2(
@@ -331,7 +356,7 @@ export async function watchCalendar(calendarId: string) {
     console.log('Performing initial sync of calendar events...')
     const syncResult = await syncCalendarEvents(
       calendarId,
-      session.user.id,
+      user.id,
       settings.craft_api_url,
       settings.craft_api_token
     )
@@ -349,7 +374,7 @@ export async function watchCalendar(calendarId: string) {
 
     // Save watch info AND tokens to database
     await supabase.from('calendars').upsert({
-      user_id: session.user.id,
+      user_id: user.id,
       google_calendar_id: calendarId,
       is_enabled: true,
       watch_channel_id: channelId,
@@ -428,6 +453,13 @@ export async function syncAllCalendars() {
 
 export async function stopWatchCalendar(calendarId: string, resourceId: string) {
   const supabase = await createClient()
+
+  // Use getUser() instead of getSession() for security
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) {
+    throw new Error('Not authenticated')
+  }
+
   const { data: { session } } = await supabase.auth.getSession()
   const providerToken = session?.provider_token
 
@@ -455,7 +487,7 @@ export async function stopWatchCalendar(calendarId: string, resourceId: string) 
       is_enabled: false,
       watch_resource_id: null,
       watch_expiration: null,
-    }).eq('user_id', session?.user.id).eq('google_calendar_id', calendarId)
+    }).eq('user_id', user.id).eq('google_calendar_id', calendarId)
 
     return { success: true }
   } catch (error) {

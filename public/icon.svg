@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#9333ea;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded square background -->
+  <rect x="5" y="5" width="90" height="90" rx="20" fill="url(#grad)"/>
+
+  <!-- Calendar icon -->
+  <g fill="white">
+    <!-- Calendar base -->
+    <rect x="25" y="30" width="50" height="45" rx="4" fill="white" opacity="0.2"/>
+    <rect x="25" y="35" width="50" height="40" rx="4" fill="white"/>
+
+    <!-- Calendar header -->
+    <rect x="25" y="30" width="50" height="12" rx="4" fill="white" opacity="0.9"/>
+
+    <!-- Binding rings -->
+    <circle cx="35" cy="28" r="2.5" fill="url(#grad)"/>
+    <circle cx="50" cy="28" r="2.5" fill="url(#grad)"/>
+    <circle cx="65" cy="28" r="2.5" fill="url(#grad)"/>
+
+    <!-- Calendar dots (dates) -->
+    <circle cx="35" cy="50" r="2" fill="url(#grad)" opacity="0.6"/>
+    <circle cx="45" cy="50" r="2" fill="url(#grad)" opacity="0.6"/>
+    <circle cx="55" cy="50" r="2" fill="url(#grad)" opacity="0.6"/>
+    <circle cx="65" cy="50" r="2" fill="url(#grad)" opacity="0.6"/>
+
+    <circle cx="35" cy="60" r="2" fill="url(#grad)" opacity="0.6"/>
+    <circle cx="45" cy="60" r="2" fill="url(#grad)" opacity="0.6"/>
+    <circle cx="55" cy="60" r="2" fill="url(#grad)"/>
+    <circle cx="65" cy="60" r="2" fill="url(#grad)" opacity="0.6"/>
+
+    <circle cx="35" cy="68" r="2" fill="url(#grad)" opacity="0.6"/>
+    <circle cx="45" cy="68" r="2" fill="url(#grad)" opacity="0.6"/>
+  </g>
+</svg>

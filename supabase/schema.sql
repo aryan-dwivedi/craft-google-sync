@@ -8,11 +8,12 @@ create table public.calendars (
   google_calendar_id text not null,
   summary text, -- Calendar name
   is_enabled boolean default false,
-  watch_channel_id text, -- The UUID channel ID sent to Google Calendar API
+  watch_channel_id text unique, -- The UUID channel ID sent to Google Calendar API (unique for webhook lookups)
   watch_resource_id text,
   watch_expiration timestamp with time zone,
   access_token text,
   refresh_token text,
+  token_expiry timestamp with time zone, -- When the access token expires
   created_at timestamp with time zone default now(),
   updated_at timestamp with time zone default now(),
   unique(user_id, google_calendar_id)

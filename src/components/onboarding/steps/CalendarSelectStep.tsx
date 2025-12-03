@@ -56,13 +56,15 @@ export function CalendarSelectStep({ onNext, onBack }: CalendarSelectStepProps) 
 
   const handleSave = async () => {
     setSaving(true)
+    setError(null)
     try {
       for (const calId of selected) {
         await watchCalendar(calId)
       }
       onNext()
     } catch (e) {
-      console.error(e)
+      console.error('Error watching calendar:', e)
+      setError(e instanceof Error ? e.message : 'Failed to set up calendar sync. Please try again.')
     } finally {
       setSaving(false)
     }
@@ -128,6 +130,12 @@ export function CalendarSelectStep({ onNext, onBack }: CalendarSelectStepProps) 
           </div>
         ))}
       </div>
+
+      {error && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-red-700 text-sm">{error}</p>
+        </div>
+      )}
 
       <div className="flex items-center justify-between pt-6">
         <Button 
